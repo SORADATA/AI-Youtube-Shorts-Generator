@@ -8,12 +8,13 @@ class AIImageGenerator:
     BASE_STYLE = (
         "cinematic realistic documentary still, photorealistic, atmospheric depth, "
         "subtle film grain, dramatic but natural lighting, rich natural textures, "
-        "high visual clarity, strong central subject, vertical 9:16 composition, "
+        "high visual clarity, strictly centered subject, extreme wide shot, vertical 9:16 composition, "
         "subject kept inside the center safe zone, clean space near the top and bottom for captions"
     )
 
     NEGATIVE_PROMPT = (
-        "text, logo, watermark, subtitles, deformed hands, extra fingers, duplicate people, "
+        "text, logo, watermark, subtitles, borders, split screen, multiple frames, "
+        "deformed hands, extra fingers, duplicate people, "
         "cropped head, blurry face, cartoon, anime"
     )
 
