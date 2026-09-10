@@ -813,7 +813,7 @@ REGLES STRICTES DE NARRATION ET VISUEL (POUR ÉVITER LES INTROS VIDES ET LA 3D) 
 2. Dès la scène 2, entre DIRECTEMENT dans le vif du sujet en racontant de vrais faits historiques, des détails précis ou une anecdote concrète et surprenante.
 3. Le milieu de la vidéo doit développer l'histoire en profondeur (les faits, les mystères, les rebondissements).
 4. Les dernières scènes doivent apporter une conclusion claire ou une révélation, pas s'arrêter en plein milieu.
-5. Pour la clé 'image_prompt', décris des décors sous forme de photographies réelles, style documentaire historique, ambiance sombre et mystérieuse. Interdiction formelle d'utiliser des termes liés à la synthèse (CGI, Unreal Engine, 3D render).
+5. CORRECTION VISUELLE MAJEURE pour 'image_prompt' : TU DOIS OBLIGATOIREMENT L'ÉCRIRE EN ANGLAIS. Génère une description STRICTEMENT VISUELLE ET MATÉRIELLE de 15 mots maximum. Décris uniquement ce que l'on voit physiquement (objets concrets, architecture, textures, lumière). Interdiction absolue d'utiliser des concepts abstraits (legend, myth, secret, story, escape, history) ou des termes de synthèse (CGI, 3D). EXEMPLE PARFAIT : "narrow damp stone corridor, flickering wooden torch, muddy ground, cinematic lighting".
 6. Si la scène se déroule dans un vrai lieu (monument, ville, château, île, etc.), donne le nom précis et complet dans 'location_name' (ex: "Château de Chambord", "Église Saint-Pierre d'Oron" et non juste "Église Saint-Pierre") ET le pays reel dans 'location_country' (ex: "France"). Si c'est juste de l'ambiance ou abstrait, laisse les deux vides ("").
 7. Pour la clé 'voice_type', choisis "narrator" pour l'ambiance globale/les faits, ou "witness" pour dynamiser (citations, avis, phrases choc). Alterne intelligemment pour garder l'audience captivée.
 8. Interdiction absolue de mentionner l'intelligence artificielle, l'IA, un algorithme, ou tout aspect meta lié a la creation de la video. Chaque scene doit parler uniquement du mystere/de l'histoire reelle, jamais de la maniere dont la video a ete produite.
@@ -853,7 +853,6 @@ title, visual_identity, audio_profile, scenes.
 Chaque scene dans le tableau 'scenes' doit contenir :
 id, text, voice_direction, pause_after_ms, stock_search, image_prompt, location_name, location_country, voice_type, mood, role, scene_type, event_context.
 """
-
         estimated_tokens_needed = min(scene_count * 280 + 1200, 6000)
         correction_feedback = ""
 
