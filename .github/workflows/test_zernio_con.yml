@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Cloner le dépôt
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🐍 Configurer Python
         uses: actions/setup-python@v5
