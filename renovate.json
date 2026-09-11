@@ -3,5 +3,11 @@
   "extends": [
     "config:recommended"
   ],
-  "forkProcessing": "enabled"
+  "forkProcessing": "enabled",
+  "packageRules": [
+    {
+      "matchDepNames": ["python"],
+      "allowedVersions": "<=3.12"
+    }
+  ]
 }
