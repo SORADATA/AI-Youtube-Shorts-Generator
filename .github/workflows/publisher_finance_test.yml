@@ -9,7 +9,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: 📥 Récupérer le code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🐍 Configurer Python
         uses: actions/setup-python@v5
