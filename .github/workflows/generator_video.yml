@@ -39,7 +39,6 @@ jobs:
       REFINE_ANGLE: ${{ github.event.inputs.refine_angle || 'true' }}
       USE_HOOK_VARIANTS: ${{ github.event.inputs.use_hook_variants || 'true' }}
       POLLINATIONS_TOKEN: ${{ secrets.POLLINATIONS_TOKEN }}
-      # (utilise par AssetManager / ContentBrain pour Wikidata/Wikipedia)
       WIKIMEDIA_CONTACT: ${{ secrets.WIKIMEDIA_CONTACT }}
 
     steps:
@@ -49,11 +48,6 @@ jobs:
       - name: ⚙️ Installer FFmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      # CORRECTIF : installation explicite de la police grasse utilisee
-      # par le watermark banner dans Composer.add_watermark_text()
-      # (fontfile="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf").
-      # Sans cette etape, ffmpeg leve une erreur "Cannot open font file"
-      # et le watermark est silencieusement absent de la video finale.
       - name: 🔤 Installer la police pour le watermark (DejaVu Bold)
         run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
 
@@ -64,11 +58,14 @@ jobs:
           bash ./models/download-ggml-model.sh base
           make -j
 
-      - name: 🐍 Configurer Python
-        uses: actions/setup-python@v5
+      - name: ⚡ Installer uv
+        uses: astral-sh/setup-uv@v3
         with:
-          python-version: "3.14"
-          cache: "pip"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: 🐍 Configurer Python 3.12
+        run: uv python install 3.12
 
       - name: 🗃️ Cache Hugging Face
         uses: actions/cache@v6
@@ -79,13 +76,13 @@ jobs:
             ${{ runner.os }}-huggingface-kokoro-
 
       - name: 📦 Installer les dépendances
-        run: pip install -r requirements.txt
+        run: uv sync --all-groups
 
       - name: 🎬 Générer la vidéo (Finance)
         run: |
           for i in 1 2 3; do
             echo "Tentative $i..."
-            python main_finance.py && exit 0
+            uv run python main_finance.py && exit 0
             echo "Échec de la tentative $i. Pause de 15 secondes avant de réessayer..."
             sleep 15
           done
@@ -140,8 +137,6 @@ jobs:
       VIDEO_DURATION: ${{ github.event.inputs.duration || '45' }}
       REFINE_ANGLE: ${{ github.event.inputs.refine_angle || 'true' }}
       USE_HOOK_VARIANTS: ${{ github.event.inputs.use_hook_variants || 'true' }}
-      # CORRECTIF : contact requis par la politique User-Agent Wikimedia
-      # (utilise par AssetManager / ContentBrain pour Wikidata/Wikipedia)
       WIKIMEDIA_CONTACT: ${{ secrets.WIKIMEDIA_CONTACT }}
 
     steps:
@@ -151,16 +146,17 @@ jobs:
       - name: ⚙️ Installer FFmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      # CORRECTIF : meme raison que ci-dessus, necessaire pour le
-      # watermark banner "@MinuteMystere" en haut de la video.
       - name: 🔤 Installer la police pour le watermark (DejaVu Bold)
         run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
 
-      - name: 🐍 Configurer Python
-        uses: actions/setup-python@v5
+      - name: ⚡ Installer uv
+        uses: astral-sh/setup-uv@v3
         with:
-          python-version: "3.14"
-          cache: "pip"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: 🐍 Configurer Python 3.12
+        run: uv python install 3.12
 
       - name: 🗃️ Cache Hugging Face
         uses: actions/cache@v6
@@ -171,13 +167,13 @@ jobs:
             ${{ runner.os }}-huggingface-kokoro-
 
       - name: 📦 Installer les dépendances
-        run: pip install -r requirements.txt
+        run: uv sync --all-groups
 
       - name: 🎬 Générer la vidéo (Minute Mystere)
         run: |
           for i in 1 2 3; do
             echo "Tentative $i..."
-            python main.py && exit 0
+            uv run python main.py && exit 0
             echo "Échec de la tentative $i. Pause de 15 secondes avant de réessayer..."
             sleep 15
           done

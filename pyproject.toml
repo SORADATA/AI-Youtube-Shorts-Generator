@@ -1,0 +1,137 @@
+# =============================================================================
+# AuraContent - pyproject.toml
+# =============================================================================
+# Dependency and tooling configuration for AI Video Generator
+#
+# Install with uv:
+#   uv sync --group default --group ai --group media --group ui --group dev
+# =============================================================================
+
+[project]
+name = "auracontent"
+version = "1.0.0"
+description = "Automated faceless video factory"
+requires-python = "<=3.12"
+
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+
+[dependency-groups]
+
+default = [
+    "python-dotenv>=1.0.1",
+    "requests>=2.31.0",
+]
+
+# ---- AI & LLMs ------------------------------------------------------------
+
+ai = [
+    "google-generativeai",
+    "google-genai",
+    "openai>=1.0.0",
+    "huggingface_hub>=0.24.0",
+    "kokoro>=0.9.4",
+    "gradio_client>=1.4.0",
+]
+
+# ---- Media Processing (Audio / Video) -------------------------------------
+
+media = [
+    "edge-tts>=7.0.2",
+    "ffmpeg-python>=0.2.0",
+    "mutagen>=1.47.0",
+    "soundfile",
+    "yt-dlp>=2025.0.0",
+]
+
+# ---- UI & Dashboard -------------------------------------------------------
+
+ui = [
+    "streamlit>=1.38.0",
+]
+
+# ---- Development -----------------------------------------------------------
+
+dev = [
+    "pytest>=8.0.0",
+    "pre-commit>=3.7.0",
+    "black>=24.0.0",
+    "ruff>=0.3.0",
+]
+
+# ---------------------------------------------------------------------------
+# Black
+# ---------------------------------------------------------------------------
+
+[tool.black]
+
+line-length = 120
+target-version = ["py312"]
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+
+line-length = 120
+target-version = "py312"
+
+src = [
+    "modules",
+    "tests",
+]
+
+[tool.ruff.lint]
+
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "B",
+    "UP",
+    "SIM",
+    "TCH",
+    "RUF",
+]
+
+ignore = [
+    "E501", # Ignoré car Black gère déjà la longueur des lignes
+]
+
+[tool.ruff.lint.isort]
+
+known-first-party = [
+    "modules",
+]
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+
+testpaths = [
+    "tests",
+]
+
+python_files = [
+    "test_*.py",
+    "*_test.py",
+]
+
+python_classes = [
+    "Test*",
+]
+
+python_functions = [
+    "test_*",
+]
+
+addopts = [
+    "--strict-markers",
+    "--tb=short",
+    "--import-mode=importlib",
+]
