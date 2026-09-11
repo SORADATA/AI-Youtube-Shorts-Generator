@@ -13,17 +13,20 @@ jobs:
       - name: 📥 Récupérer le code
         uses: actions/checkout@v4
         
-      - name: 🐍 Configurer Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-          cache: "pip"
-          
       - name: ⚙️ Installer FFmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
         
+      - name: ⚡ Installer uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: 🐍 Configurer Python 3.12
+        run: uv python install 3.12
+        
       - name: 📦 Installer les dépendances minimales
-        run: pip install requests
+        run: uv sync --all-groups
         
       - name: 🚀 Lancer les scripts de publication
         env:
@@ -35,13 +38,13 @@ jobs:
           YOUTUBE_CAPITAL_SIMPLE_ID: ${{ secrets.YOUTUBE_CAPITAL_SIMPLE_ID }}
         run: |
           # 1. On lance toujours le premier script
-          python publish.py
+          uv run python publish.py
           mv loudness_report.txt loudness_report_standard.txt || true
           
           # 2. On lance publish_finance.py uniquement si la variable d'environnement est à "true"
           if [ "$ACTIVER_FINANCE" = "true" ]; then
             echo "Lancement de publish_finance.py..."
-            python publish_finance.py
+            uv run python publish_finance.py
             mv loudness_report.txt loudness_report_finance.txt || true
           else
             echo "publish_finance.py ignoré (désactivé par configuration)."
