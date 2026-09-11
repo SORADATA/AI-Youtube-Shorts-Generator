@@ -44,7 +44,7 @@ jobs:
 
     steps:
       - name: 📥 Cloner le dépôt
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: ⚙️ Installer FFmpeg et espeak-ng (requis par kokoro TTS)
         run: sudo apt-get update && sudo apt-get install -y ffmpeg espeak-ng
@@ -59,11 +59,11 @@ jobs:
       - name: 🐍 Configurer Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.14"
           cache: "pip"
 
       - name: 🗃️ Cache Hugging Face
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface
           key: ${{ runner.os }}-huggingface-kokoro-v1

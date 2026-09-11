@@ -43,7 +43,7 @@ jobs:
 
     steps:
       - name: 📥 Cloner le dépôt
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: ⚙️ Installer FFmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
@@ -68,7 +68,7 @@ jobs:
         run: uv python install 3.12
 
       - name: 🗃️ Cache Hugging Face
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface
           key: ${{ runner.os }}-huggingface-kokoro-v1
@@ -141,7 +141,7 @@ jobs:
 
     steps:
       - name: 📥 Cloner le dépôt
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: ⚙️ Installer FFmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
@@ -159,7 +159,7 @@ jobs:
         run: uv python install 3.12
 
       - name: 🗃️ Cache Hugging Face
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface
           key: ${{ runner.os }}-huggingface-kokoro-v1
