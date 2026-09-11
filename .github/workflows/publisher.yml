@@ -49,7 +49,7 @@ jobs:
 
       - name: 💾 Sauvegarder les rapports de loudness
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Loudness-Reports-Publish-${{ github.run_id }}
           path: loudness_report_*.txt 

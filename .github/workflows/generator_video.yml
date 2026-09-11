@@ -103,7 +103,7 @@ jobs:
 
       - name: 💾 Sauvegarder le rapport (Finance)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Loudness-Report-Finance-${{ github.run_id }}
           path: loudness_finance.txt
@@ -111,7 +111,7 @@ jobs:
 
       - name: 💾 Sauvegarder la vidéo (Finance)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Video-TikTok-Finance-${{ github.run_id }}
           path: assets/final/final_short.mp4
@@ -119,7 +119,7 @@ jobs:
 
       - name: 💾 Sauvegarder la légende (Finance)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Caption-Texte-Finance-${{ github.run_id }}
           path: caption.txt
@@ -195,7 +195,7 @@ jobs:
 
       - name: 💾 Sauvegarder le rapport (Minute Mystere)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Loudness-Report-Minute Mystere-${{ github.run_id }}
           path: loudness_general.txt
@@ -203,7 +203,7 @@ jobs:
 
       - name: 💾 Sauvegarder la vidéo (Minute Mystere)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Video-TikTok-MinuteMystere-${{ github.run_id }}
           path: assets/final/final_short.mp4
@@ -211,7 +211,7 @@ jobs:
 
       - name: 💾 Sauvegarder la légende (Minute Mystere)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Caption-Texte-MinuteMystere-${{ github.run_id }}
           path: caption.txt

@@ -95,7 +95,7 @@ jobs:
 
       - name: 💾 Sauvegarder le rapport de loudness
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Loudness-Report-${{ github.run_id }}
           path: loudness_report.txt
@@ -103,7 +103,7 @@ jobs:
 
       - name: 💾 Sauvegarder la vidéo finale
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Video-TikTok-Prete-${{ github.run_id }}
           path: assets/final/final_short.mp4
@@ -111,7 +111,7 @@ jobs:
 
       - name: 💾 Sauvegarder la légende
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Caption-Texte-Finance-${{ github.run_id }}
           path: caption.txt
