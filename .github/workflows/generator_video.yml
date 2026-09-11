@@ -71,7 +71,7 @@ jobs:
           cache: "pip"
 
       - name: 🗃️ Cache Hugging Face
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface
           key: ${{ runner.os }}-huggingface-kokoro-v1
@@ -163,7 +163,7 @@ jobs:
           cache: "pip"
 
       - name: 🗃️ Cache Hugging Face
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface
           key: ${{ runner.os }}-huggingface-kokoro-v1
