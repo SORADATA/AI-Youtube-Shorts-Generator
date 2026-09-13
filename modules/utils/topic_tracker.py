@@ -15,9 +15,9 @@ sous le seuil de 0.6, car seuls les noms de lieux différents restaient
 comparés). Résultat concret observé en production : ~25 sujets sur 65
 contenaient le mot "tunnel" sans jamais être bloqués par is_duplicate_topic.
 
-Deux corrections independantes et complementaires :
+Deux corrections independantes et complementaires pour les DOUBLONS :
 1. STOPWORDS ne contient plus que les mots vraiment vides de sens
-   (articles, prepositions, mots meta comme "mystere"/"secret"/"decouverte").
+   (articles, prepositions, mots meta comme "decouverte"/"histoire").
    Les mots de TYPE DE LIEU/CONCEPT (tunnel, chateau, souterrain...) restent
    dans le calcul de similarite classique.
 2. Un second garde-fou INDEPENDANT du nom de lieu : CONCEPT_GROUPS regroupe
@@ -27,10 +27,21 @@ Deux corrections independantes et complementaires :
    CONCEPT_LOOKBACK derniers sujets), le nouveau sujet est aussi considere
    comme un doublon, meme si le lieu precis est different.
 
-Utilisation typique dans brain.py (inchangee) :
+NOUVEAU (rotation categorie + region) :
+En complément du blocage de doublons, ce fichier gère aussi la ROTATION
+FORCÉE de catégorie thématique et de région géographique, pour empêcher
+que le générateur de sujet (get_trending_topic dans brain.py) ne converge
+systématiquement vers "Paris" ou vers un même type de concept. Stockage
+séparé du fichier topic_history.json existant (qui reste un simple
+tableau de strings, format inchangé), dans un second fichier JSON dédié
+topic_rotation_state.json, pour ne rien casser côté format existant.
+
+Utilisation typique dans brain.py :
 
     from modules.utils.topic_tracker import (
         load_topic_history, is_duplicate_topic, record_topic_usage,
+        load_last_categories, save_last_category,
+        load_last_regions, save_last_region,
     )
 
     used_topics = load_topic_history()
@@ -51,6 +62,13 @@ from difflib import SequenceMatcher
 
 TOPIC_HISTORY_PATH = os.path.join(
     os.getcwd(), "assets", "state", "topic_history.json"
+)
+
+# Fichier séparé pour la rotation catégorie/région, distinct de
+# topic_history.json pour ne pas changer son format existant (liste
+# simple de strings).
+TOPIC_ROTATION_PATH = os.path.join(
+    os.getcwd(), "assets", "state", "topic_rotation_state.json"
 )
 
 # Seuil de similarité (0-1) au-dessus duquel deux sujets sont considérés
@@ -147,7 +165,7 @@ def _concepts_in_title(title: str) -> set:
     return found
 
 
-def _is_concept_overused(candidate: str, recent_history: list) -> str | None:
+def _is_concept_overused(candidate: str, recent_history: list):
     """
     Vérifie si le candidat appartient à un concept déjà trop utilisé dans
     les derniers sujets. Retourne le nom du concept sur-utilisé, ou None.
@@ -219,3 +237,74 @@ def record_topic_usage(topic):
             json.dump(history, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"⚠️ Impossible d'écrire topic_history.json : {e}")
+
+
+# ======================================================================
+# ROTATION FORCÉE : catégorie thématique et région géographique
+# ----------------------------------------------------------------------
+# Objectif : empêcher get_trending_topic() de converger systématiquement
+# vers un même type de sujet (ex: tunnel) ou une même zone (ex: Paris).
+# Stockage dans un fichier JSON séparé et structuré
+# ({"last_categories": [...], "last_regions": [...]}), distinct du
+# tableau simple topic_history.json pour ne rien casser côté existant.
+# ======================================================================
+
+def _load_rotation_state() -> dict:
+    if not os.path.exists(TOPIC_ROTATION_PATH):
+        return {"last_categories": [], "last_regions": []}
+    try:
+        with open(TOPIC_ROTATION_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {"last_categories": [], "last_regions": []}
+        data.setdefault("last_categories", [])
+        data.setdefault("last_regions", [])
+        return data
+    except Exception as e:
+        print(f"⚠️ Impossible de charger topic_rotation_state.json, on repart de zéro : {e}")
+        return {"last_categories": [], "last_regions": []}
+
+
+def _save_rotation_state(data: dict) -> None:
+    os.makedirs(os.path.dirname(TOPIC_ROTATION_PATH), exist_ok=True)
+    try:
+        with open(TOPIC_ROTATION_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ Impossible d'écrire topic_rotation_state.json : {e}")
+
+
+def load_last_categories(n: int = 2) -> list:
+    """Retourne les n dernières catégories thématiques utilisées."""
+    data = _load_rotation_state()
+    categories = data.get("last_categories", [])
+    return categories[-n:] if categories else []
+
+
+def save_last_category(category: str) -> None:
+    """Ajoute une catégorie à l'historique de rotation (FIFO, 10 max)."""
+    if not category:
+        return
+    data = _load_rotation_state()
+    categories = data.get("last_categories", [])
+    categories.append(category)
+    data["last_categories"] = categories[-10:]
+    _save_rotation_state(data)
+
+
+def load_last_regions(n: int = 3) -> list:
+    """Retourne les n dernières régions géographiques utilisées."""
+    data = _load_rotation_state()
+    regions = data.get("last_regions", [])
+    return regions[-n:] if regions else []
+
+
+def save_last_region(region: str) -> None:
+    """Ajoute une région à l'historique de rotation (FIFO, 10 max)."""
+    if not region:
+        return
+    data = _load_rotation_state()
+    regions = data.get("last_regions", [])
+    regions.append(region)
+    data["last_regions"] = regions[-10:]
+    _save_rotation_state(data)
