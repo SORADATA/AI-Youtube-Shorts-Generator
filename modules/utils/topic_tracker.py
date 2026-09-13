@@ -1,21 +1,54 @@
 """
 Tracker de sujets déjà utilisés, pour empêcher le pipeline de régénérer
 plusieurs vidéos sur le même sujet réel (ex: 5 videos sur le Palais des
-Papes d'Avignon avec des titres reformulés différemment).
+Papes d'Avignon avec des titres reformulés différemment) ET pour empêcher
+la sur-répétition d'un même CONCEPT récurrent (ex: "tunnel secret") même
+quand le lieu précis change à chaque fois.
 
-Fonctionne sur le même principe que hook_tracker.py : un historique
-persisté sur disque (JSON), consulté et mis à jour à chaque génération.
+CORRECTIF APPLIQUÉ (voir historique) :
+La version précédente mettait "tunnel", "souterrain", "château", "palais",
+"secret", "cache" etc. dans STOPWORDS. Ces mots étaient donc retirés des
+deux titres AVANT le calcul de similarité, ce qui rendait impossible la
+détection de doublons thématiques du type "Le tunnel secret de la
+Conciergerie" vs "Le tunnel oublié de la Bastille" (score mesuré : 0.40,
+sous le seuil de 0.6, car seuls les noms de lieux différents restaient
+comparés). Résultat concret observé en production : ~25 sujets sur 65
+contenaient le mot "tunnel" sans jamais être bloqués par is_duplicate_topic.
+
+Deux corrections independantes et complementaires pour les DOUBLONS :
+1. STOPWORDS ne contient plus que les mots vraiment vides de sens
+   (articles, prepositions, mots meta comme "decouverte"/"histoire").
+   Les mots de TYPE DE LIEU/CONCEPT (tunnel, chateau, souterrain...) restent
+   dans le calcul de similarite classique.
+2. Un second garde-fou INDEPENDANT du nom de lieu : CONCEPT_GROUPS regroupe
+   les synonymes d'un meme concept recurrent (ex: tunnel/souterrain/passage
+   secret/catacombe = meme "famille"). Si un concept de cette famille a ete
+   utilise trop souvent recemment (>= CONCEPT_MAX_RECENT_USES sur les
+   CONCEPT_LOOKBACK derniers sujets), le nouveau sujet est aussi considere
+   comme un doublon, meme si le lieu precis est different.
+
+NOUVEAU (rotation categorie + region) :
+En complément du blocage de doublons, ce fichier gère aussi la ROTATION
+FORCÉE de catégorie thématique et de région géographique, pour empêcher
+que le générateur de sujet (get_trending_topic dans brain.py) ne converge
+systématiquement vers "Paris" ou vers un même type de concept. Stockage
+séparé du fichier topic_history.json existant (qui reste un simple
+tableau de strings, format inchangé), dans un second fichier JSON dédié
+topic_rotation_state.json, pour ne rien casser côté format existant.
 
 Utilisation typique dans brain.py :
 
     from modules.utils.topic_tracker import (
         load_topic_history, is_duplicate_topic, record_topic_usage,
+        load_last_categories, save_last_category,
+        load_last_regions, save_last_region,
     )
 
     used_topics = load_topic_history()
     for attempt in range(MAX_RETRIES):
         candidate = <generation LLM du sujet>
-        if not is_duplicate_topic(candidate, used_topics):
+        is_dup, matched = is_duplicate_topic(candidate, used_topics)
+        if not is_dup:
             record_topic_usage(candidate)
             return candidate
         # sinon on regenere
@@ -31,6 +64,13 @@ TOPIC_HISTORY_PATH = os.path.join(
     os.getcwd(), "assets", "state", "topic_history.json"
 )
 
+# Fichier séparé pour la rotation catégorie/région, distinct de
+# topic_history.json pour ne pas changer son format existant (liste
+# simple de strings).
+TOPIC_ROTATION_PATH = os.path.join(
+    os.getcwd(), "assets", "state", "topic_rotation_state.json"
+)
+
 # Seuil de similarité (0-1) au-dessus duquel deux sujets sont considérés
 # comme le même sujet réel malgré une reformulation différente.
 DEFAULT_SIMILARITY_THRESHOLD = 0.6
@@ -41,23 +81,54 @@ DEFAULT_SIMILARITY_THRESHOLD = 0.6
 # un nouveau sujet a une video vieille de 2 ans).
 MAX_HISTORY_SIZE = 500
 
-# Mots "gabarit" du pipeline qui reviennent dans presque tous les titres
-# et ne portent aucune information sur le SUJET réel (l'entité/lieu).
+# --------------------------------------------------------------------
+# STOPWORDS : uniquement des mots réellement vides de sens (articles,
+# prépositions, mots "méta" génériques). On NE met plus ici les mots qui
+# désignent un TYPE de lieu ou de concept (tunnel, château, secret...),
+# car ce sont justement ceux qui permettent de détecter la sur-répétition
+# d'un même type de sujet.
+# --------------------------------------------------------------------
 STOPWORDS = {
     "le", "la", "les", "l", "de", "des", "du", "un", "une", "et", "en",
-    "sur", "sous", "dans", "au", "aux", "a", "d", "revele", "revelee",
-    "mystere", "mysteres", "secret", "secrets", "secrete", "decouvert",
-    "decouverte", "apres", "ans", "oubli", "millenaire", "medieval",
-    "medievale", "france", "francaise", "francais",
-    "chateau", "tour", "tunnel", "tunnels", "forteresse",
-    "palais", "abbaye", "grotte", "basilique", "monastere",
-    "couvent", "cite", "ville", "ile", "pont", "salle",
-    "chambre", "piece", "chapelle", "eglise",
-    "souterrain", "souterrains", "souterraine", "cathedrale",
-    "cathedrales", "enfouies", "enfoui", "enfouie",
-    "cachee", "cache", "caches", "trouve", "trouvee", "legendes",
-    "legende", "histoire", "historique", "veritable", "reelle", "reel",
+    "sur", "sous", "dans", "au", "aux", "a", "d",
+    "revele", "revelee", "decouvert", "decouverte",
+    "apres", "ans", "oubli",
+    "france", "francaise", "francais",
+    "cite", "ville",
+    "trouve", "trouvee",
+    "histoire", "historique", "veritable", "reelle", "reel",
 }
+
+# --------------------------------------------------------------------
+# CONCEPT_GROUPS : familles de mots-clés désignant le MÊME concept
+# récurrent, indépendamment du lieu précis mentionné. Sert de garde-fou
+# supplémentaire pour éviter que "tunnel de la Conciergerie" puis "tunnel
+# de la Bastille" puis "passage secret de Notre-Dame" passent tous comme
+# des sujets "différents" simplement parce que le lieu change.
+# --------------------------------------------------------------------
+CONCEPT_GROUPS = {
+    "souterrain": {
+        "tunnel", "tunnels", "souterrain", "souterrains", "souterraine",
+        "passage", "catacombe", "catacombes", "galerie", "galeries",
+        "cave", "caves", "crypte", "cryptes",
+    },
+    "salle_cachee": {
+        "salle", "chambre", "piece", "cachee", "cache", "caches",
+        "secrete", "secretes",
+    },
+    "tresor": {
+        "tresor", "tresors", "or", "bijou", "bijoux", "magot",
+    },
+    "malediction": {
+        "malediction", "maudit", "maudite", "sort", "sortilege",
+    },
+}
+
+# Fenêtre glissante sur laquelle on évalue la sur-répétition d'un concept.
+CONCEPT_LOOKBACK = 8
+# Nombre max d'usages tolérés d'un même concept dans cette fenêtre avant
+# de considérer tout nouveau sujet du même concept comme un doublon.
+CONCEPT_MAX_RECENT_USES = 2
 
 
 def _strip_accents(text: str) -> str:
@@ -82,6 +153,35 @@ def _similarity(title_a: str, title_b: str) -> float:
     return max(overlap, seq * 0.7)
 
 
+def _concepts_in_title(title: str) -> set:
+    """Retourne l'ensemble des familles conceptuelles présentes dans le titre."""
+    kw = _strip_accents(title.lower())
+    kw = re.sub(r"[^a-z0-9\s\-]", " ", kw)
+    words = set(re.split(r"[\s\-]+", kw))
+    found = set()
+    for concept_name, variants in CONCEPT_GROUPS.items():
+        if words & variants:
+            found.add(concept_name)
+    return found
+
+
+def _is_concept_overused(candidate: str, recent_history: list):
+    """
+    Vérifie si le candidat appartient à un concept déjà trop utilisé dans
+    les derniers sujets. Retourne le nom du concept sur-utilisé, ou None.
+    """
+    candidate_concepts = _concepts_in_title(candidate)
+    if not candidate_concepts:
+        return None
+
+    window = recent_history[-CONCEPT_LOOKBACK:] if recent_history else []
+    for concept in candidate_concepts:
+        count = sum(1 for past in window if concept in _concepts_in_title(past))
+        if count >= CONCEPT_MAX_RECENT_USES:
+            return concept
+    return None
+
+
 def load_topic_history():
     """Charge la liste des sujets déjà utilisés (liste de strings)."""
     if not os.path.exists(TOPIC_HISTORY_PATH):
@@ -99,15 +199,26 @@ def load_topic_history():
 
 def is_duplicate_topic(candidate, history, threshold=DEFAULT_SIMILARITY_THRESHOLD):
     """
-    Retourne (True, sujet_similaire) si le candidat ressemble trop a un
-    sujet deja utilise, sinon (False, None).
+    Retourne (True, raison) si le candidat :
+    - ressemble trop (similarité textuelle/mots-clés) à un sujet déjà
+      utilisé, OU
+    - appartient à une famille conceptuelle (tunnel/souterrain, salle
+      cachée, trésor, malédiction...) sur-utilisée récemment, même avec
+      un lieu différent à chaque fois.
+    Sinon retourne (False, None).
     """
     if not candidate:
         return False, None
+
     for past_topic in history:
         sim = _similarity(candidate, past_topic)
         if sim >= threshold:
             return True, past_topic
+
+    overused_concept = _is_concept_overused(candidate, history)
+    if overused_concept:
+        return True, f"concept sur-utilisé récemment : '{overused_concept}'"
+
     return False, None
 
 
@@ -126,3 +237,74 @@ def record_topic_usage(topic):
             json.dump(history, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"⚠️ Impossible d'écrire topic_history.json : {e}")
+
+
+# ======================================================================
+# ROTATION FORCÉE : catégorie thématique et région géographique
+# ----------------------------------------------------------------------
+# Objectif : empêcher get_trending_topic() de converger systématiquement
+# vers un même type de sujet (ex: tunnel) ou une même zone (ex: Paris).
+# Stockage dans un fichier JSON séparé et structuré
+# ({"last_categories": [...], "last_regions": [...]}), distinct du
+# tableau simple topic_history.json pour ne rien casser côté existant.
+# ======================================================================
+
+def _load_rotation_state() -> dict:
+    if not os.path.exists(TOPIC_ROTATION_PATH):
+        return {"last_categories": [], "last_regions": []}
+    try:
+        with open(TOPIC_ROTATION_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {"last_categories": [], "last_regions": []}
+        data.setdefault("last_categories", [])
+        data.setdefault("last_regions", [])
+        return data
+    except Exception as e:
+        print(f"⚠️ Impossible de charger topic_rotation_state.json, on repart de zéro : {e}")
+        return {"last_categories": [], "last_regions": []}
+
+
+def _save_rotation_state(data: dict) -> None:
+    os.makedirs(os.path.dirname(TOPIC_ROTATION_PATH), exist_ok=True)
+    try:
+        with open(TOPIC_ROTATION_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ Impossible d'écrire topic_rotation_state.json : {e}")
+
+
+def load_last_categories(n: int = 2) -> list:
+    """Retourne les n dernières catégories thématiques utilisées."""
+    data = _load_rotation_state()
+    categories = data.get("last_categories", [])
+    return categories[-n:] if categories else []
+
+
+def save_last_category(category: str) -> None:
+    """Ajoute une catégorie à l'historique de rotation (FIFO, 10 max)."""
+    if not category:
+        return
+    data = _load_rotation_state()
+    categories = data.get("last_categories", [])
+    categories.append(category)
+    data["last_categories"] = categories[-10:]
+    _save_rotation_state(data)
+
+
+def load_last_regions(n: int = 3) -> list:
+    """Retourne les n dernières régions géographiques utilisées."""
+    data = _load_rotation_state()
+    regions = data.get("last_regions", [])
+    return regions[-n:] if regions else []
+
+
+def save_last_region(region: str) -> None:
+    """Ajoute une région à l'historique de rotation (FIFO, 10 max)."""
+    if not region:
+        return
+    data = _load_rotation_state()
+    regions = data.get("last_regions", [])
+    regions.append(region)
+    data["last_regions"] = regions[-10:]
+    _save_rotation_state(data)

@@ -3,6 +3,7 @@ import re
 import json
 import time
 import requests
+import random
 from openai import OpenAI
 from dotenv import load_dotenv
 from constants import (
@@ -10,7 +11,11 @@ from constants import (
     OPENROUTER_FALLBACK_MODEL_1,
     OPENROUTER_FALLBACK_MODEL_2
 )
-from modules.utils.topic_tracker import load_topic_history, is_duplicate_topic
+from modules.utils.topic_tracker import (
+    load_topic_history, is_duplicate_topic, record_topic_usage,
+    load_last_categories, save_last_category,
+    load_last_regions, save_last_region,
+)
 
 try:
     from modules.utils.client_http.zernio_client import get_latest_videos_stats
@@ -94,8 +99,7 @@ AI_MENTION_PATTERNS = [
 def _contains_ai_mention(text):
     if not text:
         return False
-    text_lower = text.lower()
-    return any(re.search(p, text_lower) for p in AI_MENTION_PATTERNS)
+    return any(re.search(p, text, re.IGNORECASE) for p in AI_MENTION_PATTERNS)
 
 
 def _format_stats_instruction(previous_stats_list, label="hooks"):
@@ -121,7 +125,7 @@ Adapte le {label} selon les performances sans citer les stats explicitement.
 def _clean_single_line_title(text):
     if not text:
         return ""
-    cleaned = text.replace('"', '').replace('"', '').replace('"', '').strip()
+    cleaned = text.replace('"', '').replace('“', '').replace('”', '').strip()
     lines = [line.strip(' -•\t') for line in cleaned.splitlines() if line.strip()]
     if not lines:
         return ""
@@ -153,6 +157,26 @@ COUNTRY_KEYWORDS = {
     "espagne": ["espagne", "espagnol", "espagnole", "catalogne", "andalousie"],
     "belgique": ["belgique", "belge"],
 }
+
+# --- Listes de diversification pour les sujets ---
+FRENCH_REGIONS = [
+    "Île-de-France (hors Paris intra-muros)",
+    "Bretagne",
+    "Normandie",
+    "Hauts-de-France",
+    "Grand Est (Alsace, Lorraine, Champagne)",
+    "Bourgogne-Franche-Comté",
+    "Auvergne-Rhône-Alpes",
+    "Nouvelle-Aquitaine",
+    "Occitanie",
+    "Provence-Alpes-Côte d'Azur",
+    "Corse",
+    "Pays de la Loire",
+    "Centre-Val de Loire",
+    "Outre-mer français (Guadeloupe, Martinique, Réunion, etc.)",
+    "Paris intra-muros",  # gardé, mais noyé parmi 13 autres options
+]
+REGION_LOOKBACK = 3  # nb de dernieres regions a exclure de la selection
 
 
 def _topic_claims_french_location(topic):
@@ -392,9 +416,8 @@ class ContentBrain:
         return content.strip()
 
     def _call_with_fallback(self, messages, temperature=1.0, json_mode=False,
-                             max_completion_tokens=3000, hard_token_cap=7500):
+                            max_completion_tokens=3000, hard_token_cap=7500):
         
-        # Configuration dynamique des fournisseurs (sans coder les modèles en dur)
         providers = [
             {
                 "name": "Groq",
@@ -424,7 +447,6 @@ class ContentBrain:
                 print(f"⚠️ Clé API manquante pour {provider['name']}, passage au suivant.")
                 continue
                 
-            # Instanciation dynamique du client pour ce fournisseur
             client = OpenAI(base_url=provider["base_url"], api_key=provider["api_key"])
             current_max_tokens = max_completion_tokens
             
@@ -457,12 +479,10 @@ class ContentBrain:
                     print(f"⚠️ Échec avec {provider['name']} (Tentative {attempt + 1}/3): {e}")
                     last_error = e
                     
-                    # DÉTECTION DE LA CENSURE (ERREUR 400)
                     if "invalid_request_error" in err_str and ("I'm sorry" in err_str or "I’m sorry" in err_str or "failed_generation" in err_str):
                         print(f"🚫 Blocage de sécurité détecté sur {provider['name']}. Bascule immédiate vers le fallback...")
-                        break # Quitte la boucle 'attempt' et passe au fournisseur suivant (OpenRouter)
+                        break 
                         
-                    # GESTION DES LIMITES DE TOKENS
                     if isinstance(e, ValueError) and "budget de tokens épuisé" in err_str:
                         current_max_tokens = max(500, min(current_max_tokens + 1500, available))
                         time.sleep(2)
@@ -484,7 +504,6 @@ class ContentBrain:
                         
             print(f"❌ Échec définitif pour {provider['name']} après 3 tentatives.")
 
-        # Si la boucle se termine sans 'return', tous les providers ont échoué
         raise RuntimeError(f"Brain Error (Script): Échec total après utilisation de tous les modèles (Groq + OpenRouter). Dernière erreur: {last_error}")
 
     def _call_json_with_retry(self, messages, temperature=1.0, max_json_retries=2,
@@ -506,35 +525,95 @@ class ContentBrain:
                 last_error = e
                 print(f"⚠️ JSON malformé reçu (tentative {attempt + 1}/{max_json_retries}), "
                       f"nouvelle tentative avec budget de tokens augmenté...")
-                max_completion_tokens = min(max_completion_tokens + 1000, 7000)
+                max_completion_tokens = min(max_completion_tokens + 1000, min(7000, hard_token_cap))
 
         raise ValueError(f"Impossible d'obtenir un JSON valide après {max_json_retries} tentatives : {last_error}")
+
+    def is_duplicate_topic_llm(self, candidate, history):
+        if not history:
+            return False, None
+        recent = history[-15:]
+        prompt = f"""Voici un nouveau sujet de video : "{candidate}"
+
+Voici les 15 derniers sujets deja publies :
+{chr(10).join(f"- {t}" for t in recent)}
+
+Le nouveau sujet reprend-il le meme TYPE de concept qu'un des sujets deja publies,
+meme si le lieu ou le nom propre change (ex: deux sujets sur un tunnel/souterrain/
+passage cache, meme a des endroits differents, comptent comme le meme type) ?
+
+Reponds uniquement en JSON : {{"is_duplicate_type": true/false, "matched_topic": "..." ou null}}"""
+
+        data = self._call_json_with_retry(
+            [{"role": "user", "content": prompt}],
+            temperature=0.1, max_completion_tokens=300
+        )
+        if data.get("is_duplicate_type"):
+            return True, data.get("matched_topic")
+        return False, None
 
     def get_trending_topic(self, previous_stats_list=None):
         stats_instruction = _format_stats_instruction(previous_stats_list, label="sujet")
         used_topics = load_topic_history()
 
+        # --- Rotation forcee de categorie thematique ---
+        THEME_CATEGORIES = [
+            "un objet ou artefact physique disparu ou vole (bijou, manuscrit, tableau, relique, instrument scientifique)",
+            "un personnage historique reel meconnu ou une affaire judiciaire oubliee",
+            "un evenement etouffe ou censure (incendie suspect, epidemie cachee, scandale politique, sabotage)",
+            "une loi, un reglement ou une tradition administrative absurde et reelle",
+            "un phenomene architectural visible en surface (facade, statue, plaque, vitrail, gargouille) avec une histoire cachee",
+            "une decouverte archeologique ou scientifique recente et peu connue",
+        ]
+        
+        last_categories = load_last_categories(n=2)
+        available_categories = [c for c in THEME_CATEGORIES if c not in last_categories] or THEME_CATEGORIES
+        forced_category = random.choice(available_categories)
+
+        # --- NOUVEAU : rotation forcee de REGION ---
+        last_regions = load_last_regions(n=REGION_LOOKBACK)
+        available_regions = [r for r in FRENCH_REGIONS if r not in last_regions] or FRENCH_REGIONS
+        forced_region = random.choice(available_regions)
+
+        # --- Ban temporaire du champ lexical souterrain si sur-represente ---
+        BANNED_IF_RECENT = ["tunnel", "souterrain", "passage secret", "catacombe", "salle secrete", "chambre secrete"]
+        recent_topics_text = " ".join(used_topics[-8:]).lower() if used_topics else ""
+        recent_ban_count = sum(recent_topics_text.count(w) for w in BANNED_IF_RECENT)
+        
+        ban_instruction = ""
+        if recent_ban_count >= 2:
+            ban_instruction = (
+                "\n\nINTERDICTION TEMPORAIRE STRICTE : tu as trop utilise recemment les concepts de "
+                "tunnel/souterrain/passage secret/catacombe/salle cachee. "
+                "INTERDICTION ABSOLUE d'utiliser ces mots ou concepts dans ce nouveau sujet."
+            )
+
         messages = [
             {"role": "system", "content": (
-                "Tu es un créateur de contenu ultra-créatif et totalement imprévisible. "
-                "Ta force est la diversité absolue : tu ne recycles jamais tes structures de phrases, "
-                "ton vocabulaire ou tes angles d'attaque. "
+                "Tu es un createur de contenu ultra-creatif et totalement imprevisible. "
+                "Ta force est la diversite absolue : tu ne recycles jamais tes structures de phrases, "
+                "ton vocabulaire, ton angle d'attaque, ni ta zone geographique. "
                 "Reponds uniquement avec un seul titre en francais, une seule ligne, sans guillemets, maximum 18 mots. "
                 "Ne montre jamais ton raisonnement. "
                 f"{ACCENT_INSTRUCTION} {NO_META_AI_INSTRUCTION} {VERACITY_INSTRUCTION}"
             )},
             {"role": "user", "content": (
-                "Donne un sujet viral totalement inédit pour TikTok en français, "
-                "portant sur un fait historique URBAIN REEL et verifiable, très peu connu du grand public, "
-                "SITUÉ STRICTEMENT EN FRANCE (idéalement des secrets parisiens ou des légendes urbaines locales). "
-                "INSTRUCTION DE DIVERSITÉ : Explore exclusivement le patrimoine français "
-                "(catacombes, monuments oubliés, lois absurdes locales, anecdotes architecturales, affaires classées). "
-                "Alterne radicalement tes formats de titres à chaque fois : utilise parfois une question provocante, "
-                "parfois une affirmation brute, un paradoxe frappant, ou une simple anecdote ciblée."
+                "Donne un sujet viral totalement inedit pour TikTok en francais, "
+                "portant sur un fait historique REEL et verifiable, tres peu connu du grand public. "
+                f"REGION IMPOSEE POUR CE SUJET : {forced_region}. "
+                "Le lieu precis du sujet doit se situer dans cette region, PAS a Paris sauf si la region "
+                "imposee est explicitement Paris. "
+                f"CATEGORIE THEMATIQUE IMPOSEE POUR CE SUJET : {forced_category}. "
+                "Le sujet doit appartenir A CETTE CATEGORIE UNIQUEMENT. "
+                "Explore aussi bien les villages, provinces, littoral, montagne, sites ruraux ou industriels "
+                "que les villes -- ne te limite jamais aux grandes metropoles. "
+                "Alterne radicalement tes formats de titres a chaque fois : question provocante, "
+                "affirmation brute, paradoxe frappant, ou simple anecdote ciblee."
+                + ban_instruction
                 + stats_instruction
                 + (
-                    "\n\nSUJETS DEJA TRAITES (Casse tes habitudes : propose un univers, un vocabulaire et un format "
-                    "radicalement différents de ce qui figure dans cette liste) :\n- " 
+                    "\n\nSUJETS DEJA TRAITES (Casse tes habitudes : propose un univers, un vocabulaire, un format "
+                    "et une region radicalement differents de ce qui figure dans cette liste) :\n- "
                     + "\n- ".join(used_topics[-30:]) if used_topics else ""
                 )
             )},
@@ -552,8 +631,12 @@ class ContentBrain:
                 print(f"⚠️ Sujet rejeté (mention IA détectée, tentative {attempt + 1}) : {topic}")
                 continue
 
+            if recent_ban_count >= 2 and any(w in topic.lower() for w in BANNED_IF_RECENT):
+                print(f"⚠️ Sujet rejeté (mot-clé souterrain banni temporairement, tentative {attempt + 1}) : {topic}")
+                continue
+
             if not (topic and 4 <= len(topic.split()) <= 18):
-                print(f"⚠️ Sujet invalide genere (tentative {attempt + 1}) : {topic}")
+                print(f"⚠️ Sujet invalide généré (tentative {attempt + 1}) : {topic}")
                 continue
 
             is_dup, matched = is_duplicate_topic(topic, used_topics)
@@ -561,9 +644,13 @@ class ContentBrain:
                 print(f"⚠️ Sujet rejeté (doublon de '{matched}', tentative {attempt + 1}) : {topic}")
                 continue
 
+            # Sauvegarde des rotations une fois le sujet validé
+            save_last_category(forced_category)
+            save_last_region(forced_region)
+
             return topic
 
-        raise ValueError(f"Impossible d'obtenir un sujet valide et unique apres 5 tentatives : {last_topic}")
+        raise ValueError(f"Impossible d'obtenir un sujet valide et unique après 5 tentatives : {last_topic}")
 
     def refine_topic_angle(self, raw_topic):
         messages = [
@@ -791,7 +878,6 @@ quelques mots factuels visuellement exploitables pour generer une image
 """
             print(f"🔗 Script ancre sur la source Wikipedia : '{source['title']}'")
         else:
-            # CORRECTIF: On force le modèle à parler de légende pour apaiser le Fact-Checker
             grounding_block = """
 ATTENTION - MODE LÉGENDE URBAINE :
 Aucune source historique stricte n'a été trouvée pour ce sujet.
@@ -1128,9 +1214,6 @@ Si tu as le moindre doute, ne signale RIEN (is_consistent: true, issues: []).
 
         allowed_roles = {"hook", "tension", "context", "value", "escalation", "reveal", "cta"}
 
-        # Normalise les variantes courantes renvoyées par le LLM (casse, espaces,
-        # accents/pluriels) vers les valeurs canoniques attendues, pour éviter
-        # que toute déviation mineure ne retombe systématiquement sur "intriguing".
         mood_aliases = {
             "ominous": "ominous", "sombre": "ominous", "menaçant": "ominous", "menacant": "ominous",
             "intriguing": "intriguing", "mystérieux": "intriguing", "mysterieux": "intriguing",
@@ -1162,7 +1245,6 @@ Si tu as le moindre doute, ne signale RIEN (is_consistent: true, issues: []).
             if scene.get("role") not in allowed_roles:
                 scene["role"] = "value"
 
-            # --- Normalisation du mood ---
             raw_mood = str(scene.get("mood", "")).strip().lower()
             normalized_mood = mood_aliases.get(raw_mood)
             if normalized_mood:
